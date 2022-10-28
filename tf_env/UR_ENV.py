@@ -5,12 +5,9 @@ from scipy.spatial.transform import Rotation as rotate
 from scipy.spatial import distance
 
 from tf_agents.environments import py_environment
-from tf_agents.environments import tf_environment
-from tf_agents.environments import tf_py_environment
 from tf_agents.environments import utils
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step
-from traitlets import observe
 
 class UR_env(py_environment.PyEnvironment):    
     #import date parameters of joints from
@@ -64,6 +61,8 @@ class UR_env(py_environment.PyEnvironment):
         self.duration_step=1
         self.stop_acuracy=1
         self._batch_size=25
+        self.stop_counter:int=0
+        self.max_steps=200
 
         self._joint_state=np.copy(self._home_position)       
         self._begin_position =self.__forward_kinematic_ur3(self._joint_state)        
@@ -84,6 +83,7 @@ class UR_env(py_environment.PyEnvironment):
         return self._observation_spec
 
     def _reset(self):
+        self.stop_counter=0
         self._state = np.copy(self._begin_position)
         self._joint_state=np.copy(self._home_position)
         self._episode_ended = False
@@ -125,9 +125,12 @@ class UR_env(py_environment.PyEnvironment):
     def __find_reward(self):        
         this_distance=distance.euclidean(self._target[0],self._state[0])
         if this_distance < self.stop_acuracy:
-            self._episode_ended=True        
+            self._episode_ended=True   
+        if self.stop_counter>self.max_steps:
+            self._episode_ended=True 
         if this_distance<self._previous_distance:
-            reward=1-(this_distance/self._previous_distance)
+            # reward=1-(this_distance/self._previous_distance)
+            reward=1
         else:
             reward=0
         self._previous_distance=this_distance
@@ -137,6 +140,8 @@ class UR_env(py_environment.PyEnvironment):
     def _step(self, action):       
         if self._episode_ended:
             return self.reset()
+        
+        self.stop_counter+=1
 
         for index, act in enumerate(action):
             angle=(self.max_anglular_velocity*act)*self.duration_step
@@ -148,18 +153,20 @@ class UR_env(py_environment.PyEnvironment):
 
         self._state = self.__forward_kinematic_ur3(self._joint_state)
         reward=self.__find_reward()
+        if self._episode_ended==True:
+            return time_step.termination(self._state, reward)
         return time_step.transition(self._state, reward)
         
 
 if __name__=='__main__':
     environment = UR_env()
-    tf_env=tf_py_environment.TFPyEnvironment(environment)
+    # tf_env=tf_py_environment.TFPyEnvironment(environment)
     
-    action =np.array([[1,1,0,0,0,0]],dtype=np.float32)
+    # action =np.array([[1,1,0,0,0,0]],dtype=np.float32)
     
-    observation=tf_env.reset()
-    observation=tf_env.step(action)
-    print(observation.observation[0][0])
+    # observation=tf_env.reset()
+    # observation=tf_env.step(action)
+    # print(observation.observation[0][0])
 
 
     # ts=tf_env.reset()
