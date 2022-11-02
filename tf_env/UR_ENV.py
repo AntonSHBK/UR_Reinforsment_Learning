@@ -63,7 +63,7 @@ class UR_env(py_environment.PyEnvironment):
 
     def __init__(
         self, 
-        max_steps=10, 
+        max_steps=30, 
         discount=0.99, 
         joints_angles =_home_position, 
         target = _defoult_target,
