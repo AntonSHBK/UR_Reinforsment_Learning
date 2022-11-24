@@ -1,9 +1,6 @@
-from ast import While
-from turtle import color
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
-import random
 import math
 
 
@@ -47,28 +44,28 @@ class UR_env(py_environment.PyEnvironment):
     )
     _joint_rotation=np.array(
         [[0,0,0],
-        [0,-90,0],
+        [0,90,0],
         [0,0,0],
         [0,0,0],
-        [0,-90,0],
-        [0,90,0]]
+        [0,90,0],
+        [0,-90,0]]
     )
     
-    _home_position = np.array([180,90,0,0,0,0],dtype=np.float32)
+    _home_position = np.array([180,-90,0,0,0,0],dtype=np.float32)
     _defoult_target = np.array(
             [[250,0,100],
-            [0,180,00]],
+            [0,180,0]],
             dtype=np.float32
         )
         
 
     def __init__(
         self, 
-        max_steps=30, 
-        discount=0.99, 
+        max_steps=10, 
+        discount=0.95, 
         joints_angles =_home_position, 
         target = _defoult_target,
-        max_anglular_velocity=10,
+        max_anglular_velocity=5,
         duration_step=1,
         stop_acuracy=10
         ):
@@ -97,11 +94,18 @@ class UR_env(py_environment.PyEnvironment):
         self.max_steps=max_steps
         self.discount = discount
 
-        self._joints_angles=np.copy(joints_angles)   
+        self._joints_angles=np.copy(joints_angles)
+
+
         self._joints_positions = []    
-        self._begin_position =self.__forward_kinematic_ur3(self._joints_angles)        
+        self._begin_position =self.__forward_kinematic_ur3(self._joints_angles)
         self._state = np.copy(self._begin_position)
         self._target = np.copy(target)
+
+        self._target_angles = self.__find_angles(target[1])   
+        self._previous_angles = self.__find_angles(self._state[1])   
+        self._previous_quotient_of_angles = self.__compute_angle_quotient(self._previous_angles)\
+    
 
         
         
@@ -134,7 +138,7 @@ class UR_env(py_environment.PyEnvironment):
         return ts.restart(self._state)
 
     # def batched(self) -> bool:
-    #     return True
+    #     return False
     
     # def batch_size(self) -> Optional[int]:
     #     return Optional(2)
@@ -162,15 +166,49 @@ class UR_env(py_environment.PyEnvironment):
     def __find_reward(self):        
         this_distance=distance.euclidean(self._target[0],self._state[0])
         if this_distance < self.stop_acuracy or self.stop_counter>self.max_steps:
-            self._episode_ended=True   
+            self._episode_ended=True
+            if this_distance < self.stop_acuracy:
+                return 1   
         # if self.stop_counter>self.max_steps:
         #     self._episode_ended=True 
+        angles = self.__find_angles(self._state[1])
+        quotient_of_angles = self.__compute_angle_quotient(angles)
+        
         discount=math.pow(self.discount,1+self.stop_counter)
-        reward=1-(this_distance/self._previous_distance)
-        reward=reward*discount
+        reward_1=1-(this_distance/self._previous_distance)
+        reward_2=1-(quotient_of_angles/self._previous_quotient_of_angles)
+        reward=(reward_1+reward_2)*discount
+
         if reward>0:
-             self._previous_distance=this_distance    
+             self._previous_distance=this_distance
+             self._previous_quotient_of_angles=quotient_of_angles    
         return reward
+
+    def __find_angles(self, angles_ZXZ):
+        rot_matrix=rotate.from_euler('ZXZ',angles_ZXZ,degrees=True)
+        axis_x=rot_matrix.apply([1,0,0])
+        axis_y=rot_matrix.apply([0,1,0])
+        axis_z=rot_matrix.apply([0,0,1])
+        
+        dist = distance.cosine([1,0,0],axis_x)
+        angle_x=np.rad2deg(np.arccos(1 - dist))
+
+        dist = distance.cosine([0,1,0],axis_y)
+        angle_y=np.rad2deg(np.arccos(1 - dist))
+
+        dist = distance.cosine([0,0,1],axis_z)
+        angle_z=np.rad2deg(np.arccos(1 - dist))
+
+        return [angle_x,angle_y,angle_z]    
+    
+    def __compute_angle_quotient(self, angle):
+        def_angle=self._target[1]
+        return math.sqrt(
+            pow(def_angle[0]-angle[0],2)+
+            pow(def_angle[1]-angle[1],2)+
+            pow(def_angle[2]-angle[2],2)
+            )
+
 
 
     def _step(self, action):       
@@ -229,10 +267,14 @@ if __name__=='__main__':
     tf_env=tf_py_environment.TFPyEnvironment(environment)
 
     print(tf_env.time_step_spec)    
-    action =np.array([[1,1,0,0,0,0]],dtype=np.float32)    
+    action =np.array([[0,0,0,1,-1,0]],dtype=np.float32)    
     obs=tf_env.reset()
-    tf_env=tf_env.step(action)
-    a= environment.render()
+    obs=tf_env.step(action)
+    print(obs.observation)
+    print(tf_env.batched)
+    print(tf_env.batch_size)
+
+
     # print(observation.observation[0][0])
 
 
