@@ -270,8 +270,7 @@ class UR_env(py_environment.PyEnvironment):
     
     _home_position = np.array([180,-90,0,0,0,0],dtype=np.float32)
     _defoult_target = np.array(
-            [[250,0,100],
-            [0,180,0]],
+            [250,0,100,0,180,0],
             dtype=np.float32
         )
         
@@ -294,7 +293,7 @@ class UR_env(py_environment.PyEnvironment):
         shape=(6,), dtype=np.float32, minimum=-1, maximum=1, name='action')
         
         self._observation_spec = array_spec.BoundedArraySpec(
-        shape=(2,3), dtype=np.float32, minimum=-np.inf, maximum=np.inf, name='observation')                
+        shape=(6,), dtype=np.float32, minimum=[-1000,-1000,-1000,-180,-180,-180], maximum=[1000,1000,1000,180,180,180], name='observation')                
         
         self._discount_spec = array_spec.BoundedArraySpec(
         shape=(), dtype=np.float32, minimum=0., maximum=1., name='discount')
@@ -319,15 +318,14 @@ class UR_env(py_environment.PyEnvironment):
         self._state = np.copy(self._begin_position)
         self._target = np.copy(target)
 
-        self._target_angles = self.__find_angles(target[1])   
-        self._previous_angles = self.__find_angles(self._state[1])   
-        self._previous_quotient_of_angles = self.__compute_angle_quotient(self._previous_angles)\
-    
+        self._target_angles = self.__find_angles(target[3:])   
+        self._previous_angles = self.__find_angles(self._state[3:])   
+        self._previous_quotient_of_angles = self.__compute_angle_quotient(self._previous_angles)
+        self._defoult_angle_quotient= self.__compute_angle_quotient(self._previous_angles)         
+        
+        self._all_distance= distance.euclidean(self._begin_position[:3],self._target[:3])
+        self._previous_distance=distance.euclidean(self._begin_position[:3],self._target[:3])
 
-        
-        
-        self._all_distance= distance.euclidean(self._begin_position[0],self._target[0])
-        self._previous_distance=self._all_distance
 
     def action_spec(self):
         """Return the actions that should be provided to `step()`"""
@@ -352,6 +350,7 @@ class UR_env(py_environment.PyEnvironment):
         self._joints_angles=np.copy(self._home_position)
         self._episode_ended = False
         self._previous_distance = self._all_distance
+        self._previous_quotient_of_angles=self._defoult_angle_quotient
         return ts.restart(self._state)
 
     # def batched(self) -> bool:
@@ -376,29 +375,32 @@ class UR_env(py_environment.PyEnvironment):
             j_pos = position.copy()
             j_orient =orientation.as_euler('ZXZ',degrees=True)
             self._joints_positions.append(np.array([j_pos,j_orient],dtype=np.float32))
-        orientation=orientation.as_euler('ZXZ',degrees=True)
-        comlex=np.array([position,orientation],dtype=np.float32)
+        orientation=np.array(orientation.as_euler('ZXZ',degrees=True),dtype=np.float32)
+        comlex = np.concatenate((position, orientation), dtype=np.float32, axis=None)
         return comlex
     
     def __find_reward(self):        
-        this_distance=distance.euclidean(self._target[0],self._state[0])
+        this_distance=distance.euclidean(self._target[:3],self._state[:3])
         if this_distance < self.stop_acuracy or self.stop_counter>self.max_steps:
             self._episode_ended=True
-            if this_distance < self.stop_acuracy:
-                return 1   
-        # if self.stop_counter>self.max_steps:
-        #     self._episode_ended=True 
-        angles = self.__find_angles(self._state[1])
-        quotient_of_angles = self.__compute_angle_quotient(angles)
-        
-        discount=math.pow(self.discount,1+self.stop_counter)
-        reward_1=1-(this_distance/self._previous_distance)
-        reward_2=1-(quotient_of_angles/self._previous_quotient_of_angles)
-        reward=(reward_1+reward_2)*discount
+            # if this_distance < self.stop_acuracy:
+            #     return 1   
 
-        if reward>0:
-             self._previous_distance=this_distance
-             self._previous_quotient_of_angles=quotient_of_angles    
+        discount=math.pow(self.discount,1+self.stop_counter)             
+        
+        this_angles = self.__find_angles(self._state[3:])
+        this_quotient_of_angles = self.__compute_angle_quotient(this_angles) 
+
+        line_difference = self._previous_distance-this_distance
+        reward_1=line_difference/self._all_distance
+
+        angle_difference=self._previous_quotient_of_angles- this_quotient_of_angles
+        reward_2=angle_difference/self._defoult_angle_quotient
+
+        self._previous_distance=this_distance
+        self._previous_quotient_of_angles=this_quotient_of_angles
+
+        reward=(reward_1+reward_2)*discount
         return reward
 
     def __find_angles(self, angles_ZXZ):
@@ -419,7 +421,7 @@ class UR_env(py_environment.PyEnvironment):
         return [angle_x,angle_y,angle_z]    
     
     def __compute_angle_quotient(self, angle):
-        def_angle=self._target[1]
+        def_angle=self._target[:3]
         return math.sqrt(
             pow(def_angle[0]-angle[0],2)+
             pow(def_angle[1]-angle[1],2)+
@@ -456,15 +458,16 @@ class UR_env(py_environment.PyEnvironment):
         return data
     
     def render(self):
+        target=self._target[:3]
         fig = plt.figure()
         frame = plt.axes(projection="3d")
         frame.set_xlim3d(-500, 500)
         frame.set_ylim3d(-500, 500)
         frame.set_zlim3d(0, 1000)
         frame.plot(
-            self._target[0][0],
-            self._target[0][1],
-            self._target[0][2],
+            target[0],
+            target[1],
+            target[2],
             '-ro',
             label='target')
         colors = ('r','g','b','y','c','m','k')
@@ -484,18 +487,26 @@ class UR_env_py_tf(UR_env,py_environment.PyEnvironment):
     
 
 if __name__=='__main__':
-    environment = UR_env()
+    target = np.array(
+            [250,200,120, 0,180,0],
+            dtype=np.float32
+        )
 
-    from tf_agents.environments import tf_py_environment
-    tf_env=tf_py_environment.TFPyEnvironment(environment)
+    environment = UR_env(target=target)
+    print(environment.time_step_spec())
 
-    print(tf_env.time_step_spec)    
-    action =np.array([[0,0,0,1,-1,0]],dtype=np.float32)    
-    obs=tf_env.reset()
-    obs=tf_env.step(action)
-    print(obs.observation)
-    print(tf_env.batched)
-    print(tf_env.batch_size)
+    # from tf_agents.environments import tf_py_environment
+    # tf_env=tf_py_environment.TFPyEnvironment(environment)
+
+    # print(tf_env.time_step_spec)    
+    # action =np.array([[-1,0,0,0,0,0]],dtype=np.float32)    
+    # obs=tf_env.reset()
+    # print(obs)    
+    # obs=tf_env.step(action)
+
+    # print(obs.observation)
+    # print(tf_env.batched)
+    # print(tf_env.batch_size)
 
 
     # print(observation.observation[0][0])
@@ -524,7 +535,8 @@ if __name__=='__main__':
     # observation=environment.step(np.array([0,1,0,0,0,0],dtype=np.float32))
     # print(observation)
 
-    # utils.validate_py_environment(environment,episodes=5,)
+    utils.validate_py_environment(environment,episodes=5,)
+    print('ok')
 
 
 
