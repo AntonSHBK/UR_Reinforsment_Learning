@@ -16,7 +16,7 @@ from tf_agents.trajectories import time_step as ts
 class EXEMPLE_env(py_environment.PyEnvironment):    
 
     _defoult_joints_angles = np.array([0,0],dtype=np.float32)
-    _defoult_target = np.array([-6,-4],dtype=np.float32)
+    _defoult_target = np.array([-2,-4],dtype=np.float32)
     
     def __init__(
         self, 
@@ -25,7 +25,7 @@ class EXEMPLE_env(py_environment.PyEnvironment):
         target = _defoult_target,
         max_anglular_velocity=5,
         duration_step=1,
-        stop_acuracy=1
+        stop_acuracy=0.1
         ):
         #specification
         self._action_spec = array_spec.BoundedArraySpec(
@@ -99,8 +99,8 @@ class EXEMPLE_env(py_environment.PyEnvironment):
         this_distance=distance.euclidean(self._target,self._state)
         if this_distance < self.stop_acuracy or self.stop_counter>self.max_steps:
             self._episode_ended=True
-            if this_distance < self.stop_acuracy:
-                return 1   
+            # if this_distance < self.stop_acuracy:
+            #     return 1   
         discount=math.pow(self.discount,1+self.stop_counter)
         reward=1-(this_distance/self._previous_distance)
         reward=reward*discount
